@@ -127,18 +127,31 @@ class Redis
     end
 
   private
-    def simple_mutex(key_name, expires = nil)
-      key_name = namespaced_key(key_name) if key_name.kind_of? Symbol
-      token = @redis.getset(key_name, API_VERSION)
 
-      return false unless token.nil?
-      @redis.expire(key_name, expires) unless expires.nil?
+    def simple_mutex(key_name, timeout = nil)
+      mutex_key = namespaced_key(key_name) if key_name.kind_of? Symbol
+      lock_timestamp = Time.now.to_i
+
+      acquired = @redis.setnx(mutex_key, lock_timestamp)
+      if !acquired
+        locked_at = @redis.get(mutex_key).to_i
+        return false if !lock_expired(locked_at, timeout)
+        locked_at_2 = @redis.getset(mutex_key, Time.now.to_i)
+        return false if locked_at_2 != locked_at
+      end
 
       begin
-        yield token
+        yield
       ensure
-        @redis.del(key_name)
+        if !lock_expired(lock_timestamp, timeout)
+          # There's still a tiny race condition here. Whee!
+          @redis.del(mutex_key)
+        end
       end
+    end
+
+    def lock_expired(timestamp, timeout)
+      timestamp + timeout < Time.now.to_i
     end
 
     def create!
