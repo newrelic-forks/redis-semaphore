@@ -1,4 +1,5 @@
-[![Code Climate](https://codeclimate.com/github/dv/redis-semaphore.png)](https://codeclimate.com/github/dv/redis-semaphore)
+[![Code Climate](https://codeclimate.com/github/dv/redis-semaphore.svg?branch=master)](https://codeclimate.com/github/dv/redis-semaphore)
+[![Build Status](https://travis-ci.org/dv/redis-semaphore.svg?branch=master)](https://travis-ci.org/dv/redis-semaphore)
 
 redis-semaphore
 ===============
@@ -7,7 +8,7 @@ Implements a mutex and semaphore using Redis and the neat BLPOP command.
 
 The mutex and semaphore is blocking, not polling, and has a fair queue serving processes on a first-come, first-serve basis. It can also have an optional timeout after which a lock is unlocked automatically, to protect against dead clients.
 
-For more info see [Wikipedia](http://en.wikipedia.org/wiki/Semaphore_(programming\)).
+For more info see [Wikipedia](http://en.wikipedia.org/wiki/Semaphore_(programming)).
 
 Usage
 -----
@@ -15,7 +16,7 @@ Usage
 Create a mutex:
 
 ```ruby
-s = Redis::Semaphore.new(:semaphore_name, :connection => "localhost")
+s = Redis::Semaphore.new(:semaphore_name, :host => "localhost")
 s.lock do
   # We're now in a mutex protected area
   # No matter how many processes are running this program,
@@ -29,7 +30,7 @@ While our application is inside the code block given to ```s.lock```, other call
 You can also allow a set number of processes inside the semaphore-protected block, in case you have a well-defined number of resources available:
 
 ```ruby
-s = Redis::Semaphore.new(:semaphore_name, :resources => 5, :connection => "localhost")
+s = Redis::Semaphore.new(:semaphore_name, :resources => 5, :host => "localhost")
 s.lock do
   # Up to five processes at a time will be able to get inside this code
   # block simultaneously.
@@ -40,7 +41,7 @@ end
 You're not obligated to use code blocks, linear calls work just fine:
 
 ```ruby
-s = Redis::Semaphore.new(:semaphore_name, :connection => "localhost")
+s = Redis::Semaphore.new(:semaphore_name, :host => "localhost")
 s.lock
 work
 s.unlock  # Don't forget this, or the mutex will stay locked!
@@ -75,7 +76,7 @@ sem.available_count # also returns 1
 In the constructor you can pass in any arguments that you would pass to a regular Redis constructor. You can even pass in your custom Redis client:
 
 ```ruby
-r = Redis.new(:connection => "localhost", :db => 222)
+r = Redis.new(:host => "localhost", :db => 222)
 s = Redis::Semaphore.new(:another_name, :redis => r)
 #...
 ```
@@ -107,10 +108,10 @@ s = Redis::Semaphore.new(:stale_semaphore, :redis = r, :stale_client_timeout => 
 Or you could start a different thread or program that frequently checks for stale locks. This has the advantage of unblocking blocking calls to Semaphore#lock as well:
 
 ```ruby
-normal_sem = Redis::Semaphore.new(:semaphore, :connection => "localhost")
+normal_sem = Redis::Semaphore.new(:semaphore, :host => "localhost")
 
 Thread.new do
-  watchdog = Redis::Semaphore.new(:semaphore, :connection => "localhost", :stale_client_timeout => 5)
+  watchdog = Redis::Semaphore.new(:semaphore, :host => "localhost", :stale_client_timeout => 5)
 
   while(true) do
     watchdog.release_stale_locks!
@@ -175,6 +176,16 @@ s = Redis::Semaphore.new(:local_semaphore, :redis = r, :stale_client_timeout => 
 Redis servers earlier than version 2.6 don't support the TIME command. In that case we fall back to using the local time automatically.
 
 
+### Expiration
+
+```redis-semaphore``` supports an expiration option, which will call the **EXPIRE** Redis command on all related keys (except for `grabbed_keys`), to make sure that after a while all evidence of the semaphore will disappear and your Redis server will not be cluttered with unused keys. Pass in the expiration timeout in seconds:
+
+```ruby
+s = Redis::Semaphore.new(:local_semaphore, :redis = r, :expiration => 100)
+```
+
+This option should only be used if you know what you're doing. If you chose a wrong expiration timeout then the semaphore might disappear in the middle of a critical section. For most situations just using the `delete!` command should suffice to remove all semaphore keys from the server after you're done using the semaphore.
+
 Installation
 ------------
 
@@ -188,6 +199,11 @@ Testing
 
 Changelog
 ---------
+
+###0.2.4 January 11, 2015
+- Fix bug with TIME and redis-namespace (thanks sos4nt!).
+- Add expiration option (thanks jcalvert!).
+- Update API version logic.
 
 ###0.2.3 September 7, 2014
 - Block-based locking return the value of the block (thanks frobcode!).
@@ -237,7 +253,7 @@ Author
 Contributors
 ------------
 
-Thanks to these awesome peeps for their contributions:
+Thanks to these awesome people for their contributions:
 
 - [Rimas Silkaitis](https://github.com/neovintage)
 - [Tim Galeckas](https://github.com/timgaleckas)
@@ -248,3 +264,7 @@ Thanks to these awesome peeps for their contributions:
 - [presskey](https://github.com/presskey)
 - [Stephen Bussey](https://github.com/sb8244)
 - [frobcode](https://github.com/frobcode)
+- [Petteri Räty](https://github.com/betelgeuse)
+- [Stefan Schüßler](https://github.com/sos4nt)
+- [Jonathan Calvert](https://github.com/jcalvert)
+

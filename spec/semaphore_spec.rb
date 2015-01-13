@@ -112,6 +112,29 @@ describe "redis" do
       end
       expect(block_value).to eq(lock_token)
     end
+
+    it "should disappear without a trace when calling `delete!`" do
+      original_key_size = @redis.keys.count
+
+      semaphore.exists_or_create!
+      semaphore.delete!
+
+      expect(@redis.keys.count).to eq(original_key_size)
+    end
+  end
+
+  describe "semaphore with expiration" do
+    let(:semaphore) { Redis::Semaphore.new(:my_semaphore, :redis => @redis, :expiration => 2) }
+    let(:multisem) { Redis::Semaphore.new(:my_semaphore_2, :resources => 2, :redis => @redis, :expiration => 2) }
+
+    it_behaves_like "a semaphore"
+
+    it "expires keys" do
+      original_key_size = @redis.keys.count
+      semaphore.exists_or_create!
+      sleep 3.0
+      expect(@redis.keys.count).to eq(original_key_size)
+    end
   end
 
   describe "semaphore without staleness checking" do
@@ -201,4 +224,23 @@ describe "redis" do
       expect(available_keys).to eq(grabbed_keys)
     end
   end
+
+  describe "version" do
+    context "with an existing versionless semaphore" do
+      let(:old_sem) { Redis::Semaphore.new(:my_semaphore, :redis => @redis) }
+      let(:semaphore) { Redis::Semaphore.new(:my_semaphore, :redis => @redis) }
+      let(:version_key) { old_sem.send(:version_key) }
+
+      before do
+        old_sem.exists_or_create!
+        @redis.del(version_key)
+      end
+
+      it "sets the version key" do
+        semaphore.exists_or_create!
+        expect(@redis.get(version_key)).not_to be_nil
+      end
+    end
+  end
+
 end

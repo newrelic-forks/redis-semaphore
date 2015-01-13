@@ -2,19 +2,21 @@ require 'redis'
 
 class Redis
   class Semaphore
+    EXISTS_TOKEN = "1"
     API_VERSION = "1"
 
-    #stale_client_timeout is the threshold of time before we assume
-    #that something has gone terribly wrong with a client and we
-    #invalidate it's lock.
+    # stale_client_timeout is the threshold of time before we assume
+    # that something has gone terribly wrong with a client and we
+    # invalidate it's lock.
     # Default is nil for which we don't check for stale clients
     # Redis::Semaphore.new(:my_semaphore, :stale_client_timeout => 30, :redis => myRedis)
     # Redis::Semaphore.new(:my_semaphore, :redis => myRedis)
     # Redis::Semaphore.new(:my_semaphore, :resources => 1, :redis => myRedis)
-    # Redis::Semaphore.new(:my_semaphore, :connection => "", :port => "")
+    # Redis::Semaphore.new(:my_semaphore, :host => "", :port => "")
     # Redis::Semaphore.new(:my_semaphore, :path => "bla")
     def initialize(name, opts = {})
       @name = name
+      @expiration = opts.delete(:expiration)
       @resource_count = opts.delete(:resources) || 1
       @stale_client_timeout = opts.delete(:stale_client_timeout)
       @redis = opts.delete(:redis) || Redis.new(opts)
@@ -23,13 +25,19 @@ class Redis
     end
 
     def exists_or_create!
-      token = @redis.getset(exists_key, API_VERSION)
+      token = @redis.getset(exists_key, EXISTS_TOKEN)
 
       if token.nil?
         create!
-      elsif token != API_VERSION
-        raise "Semaphore exists but running as wrong version (version #{token} vs #{API_VERSION})."
       else
+        # Previous versions of redis-semaphore did not set `version_key`.
+        # Make sure it's set now, so we can use it in future versions.
+
+        if token == API_VERSION && @redis.get(version_key).nil?
+          @redis.set(version_key, API_VERSION)
+        end
+
+        set_expiration_if_necessary
         true
       end
     end
@@ -42,6 +50,7 @@ class Redis
       @redis.del(available_key)
       @redis.del(grabbed_key)
       @redis.del(exists_key)
+      @redis.del(version_key)
     end
 
     def lock(timeout = 0)
@@ -80,7 +89,7 @@ class Redis
         @tokens.each do |token|
           return true if locked?(token)
         end
-        
+
         false
       end
     end
@@ -163,10 +172,18 @@ class Redis
         @resource_count.times do |index|
           @redis.rpush(available_key, index)
         end
+        @redis.set(version_key, API_VERSION)
+        @redis.persist(exists_key)
 
-        # Persist key
-        @redis.del(exists_key)
-        @redis.set(exists_key, API_VERSION)
+        set_expiration_if_necessary
+      end
+    end
+
+    def set_expiration_if_necessary
+      if @expiration
+        [available_key, exists_key, version_key].each do |key|
+          @redis.expire(key, @expiration)
+        end
       end
     end
 
@@ -198,12 +215,16 @@ class Redis
       @grabbed_key ||= namespaced_key('GRABBED')
     end
 
+    def version_key
+      @version_key ||= namespaced_key('VERSION')
+    end
+
     def current_time
       if @use_local_time
         Time.now
       else
         begin
-          instant = @redis.time
+          instant = redis_namespace? ? @redis.redis.time : @redis.time
           Time.at(instant[0], instant[1])
         rescue
           @use_local_time = true
