@@ -145,7 +145,7 @@ class Redis
       if !acquired
         locked_at = @redis.get(mutex_key).to_i
         return false if !lock_expired(locked_at, timeout)
-        locked_at_2 = @redis.getset(mutex_key, Time.now.to_i)
+        locked_at_2 = @redis.getset(mutex_key, Time.now.to_i).to_i
         return false if locked_at_2 != locked_at
       end
 
